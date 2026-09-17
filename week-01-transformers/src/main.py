@@ -33,6 +33,13 @@ class Transformer(nn.Module):
 
         # Embedding layers: from Claude
         self.token_embedding = nn.Embedding(vocab_size, d_model)
+        # nn.Embedding's default init has std=1.0. That's fine for a standalone embedding,
+        # but this embedding is weight-tied to the output head below, so std=1.0 also
+        # becomes the output projection's weight scale - about 28x larger than a Linear's
+        # usual default init (~1/sqrt(d_model)). That blew up init logits and made the
+        # first-step loss ~159 instead of the ~ln(vocab_size) a random model should give.
+        # GPT-2 sidesteps this the same way: rescale the tied embedding to a small std.
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
         # RoPE is task 4's ablation swap for this learned embedding - it rotates q/k
         # inside attention instead of adding a lookup table here, so it isn't a drop-in
@@ -48,7 +55,10 @@ class Transformer(nn.Module):
 
         # Final layer normalization and output projection
         self.ln_f = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, vocab_size)
+        # bias=False: head.weight is tied to token_embedding.weight below, but a bias
+        # has no embedding-side counterpart - it'd just be a free per-token logit offset
+        # unrelated to the tying. Standard practice (GPT-2/nanoGPT) drops it on a tied head.
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
 
         # Weight tying: share the embedding matrix with the output projection instead of
         # learning a second (vocab_size, d_model)-shaped matrix. Shapes already line up -
