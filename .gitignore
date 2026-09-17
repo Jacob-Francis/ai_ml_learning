@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+.DS_Store
+
+# common ML artifact dirs
+*.pt
+*.pth
+*.ckpt
+wandb/
+outputs/
+checkpoints/
+data/raw/
