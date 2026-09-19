@@ -16,12 +16,13 @@ Karpathy's nanoGPT is the reference if you get stuck, but write yours first and 
 import torch
 from torch import nn
 
-from mytransformer import TransformerBlock as MyTransformerBlock
+from mytransformer import TransformerBlock as MyTransformerBlock, make_norm
 
 # model class
 
 class Transformer(nn.Module):
-    def __init__(self, d_model, num_layers, num_heads, vocab_size, block_size, positional_embedding_type='learned'):
+    def __init__(self, d_model, num_layers, num_heads, vocab_size, block_size,
+                 positional_embedding_type='learned', norm_type='layernorm', mlp_type='gelu'):
 
         super().__init__()
         self.d_model = d_model # embedding dimension
@@ -41,20 +42,35 @@ class Transformer(nn.Module):
         # GPT-2 sidesteps this the same way: rescale the tied embedding to a small std.
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
-        # RoPE is task 4's ablation swap for this learned embedding - it rotates q/k
-        # inside attention instead of adding a lookup table here, so it isn't a drop-in
-        # yet (TransformerBlock's rope branch is still a stub). Fail loudly rather than
-        # silently training a model with no positional information.
-        if positional_embedding_type == 'rope':
-            raise NotImplementedError(
-                "RoPE isn't implemented yet (task 4 ablation) - use positional_embedding_type='learned'"
+        # Positional information is provided one of two ways (the week-4 ablation swap):
+        # - 'learned': a lookup table here, added to the token embedding below, exactly like
+        #   the original Transformer's alternative to sinusoidal encodings.
+        # - 'rope': no table at all - instead, every block rotates its own q/k vectors by an
+        #   angle that depends on position, inside attention (see mytransformer.apply_rope).
+        #   Positional info never touches the residual stream directly under RoPE, so there's
+        #   nothing to build or add here.
+        if positional_embedding_type == 'learned':
+            self.position_embedding = nn.Embedding(block_size, d_model)
+        elif positional_embedding_type == 'rope':
+            self.position_embedding = None
+        else:
+            raise ValueError(
+                f"unknown positional_embedding_type {positional_embedding_type!r}, "
+                "expected 'learned' or 'rope'"
             )
 
-        self.position_embedding = nn.Embedding(block_size, d_model)
-        self.blocks = nn.ModuleList([MyTransformerBlock(d_model, num_heads) for _ in range(num_layers)])
+        self.blocks = nn.ModuleList([
+            MyTransformerBlock(
+                d_model, num_heads,
+                positional_embedding_type=positional_embedding_type,
+                norm_type=norm_type,
+                mlp_type=mlp_type,
+            )
+            for _ in range(num_layers)
+        ])
 
         # Final layer normalization and output projection
-        self.ln_f = nn.LayerNorm(d_model)
+        self.norm_f = make_norm(d_model, norm_type)
         # bias=False: head.weight is tied to token_embedding.weight below, but a bias
         # has no embedding-side counterpart - it'd just be a free per-token logit offset
         # unrelated to the tying. Standard practice (GPT-2/nanoGPT) drops it on a tied head.
@@ -81,7 +97,9 @@ class Transformer(nn.Module):
                 given, one is built automatically below (every block shares the same mask).
 
         Architecture:
-        1. Token and positional embeddings are summed to form the input embeddings.
+        1. Token and positional embeddings are summed to form the input embeddings
+           ('learned' mode) - or positions are left to be handled entirely inside
+           attention ('rope' mode, see mytransformer.apply_rope).
         2. The input embeddings are passed through a series of transformer blocks, each consisting of
            multi-head self-attention, layer normalization, and a feed-forward network.
            Each block is pre-norm with residual connections (see TransformerBlock.forward), and
@@ -101,11 +119,13 @@ class Transformer(nn.Module):
 
         batch_size, seq_length = x.size()
 
-        # 1. Token and (learned) positional embeddings summed to form the input embeddings.
-        #    RoPE would replace this addition entirely and instead rotate q/k inside
-        #    attention - see the NotImplementedError note in __init__.
-        positions = torch.arange(seq_length, device=x.device)
-        x = self.token_embedding(x) + self.position_embedding(positions)
+        # 1. Token embedding, plus the learned positional embedding if that's the mode in use.
+        #    Under RoPE, position is injected later, inside each block's attention - nothing to
+        #    add here.
+        x = self.token_embedding(x)
+        if self.positional_embedding_type == 'learned':
+            positions = torch.arange(seq_length, device=x.device)
+            x = x + self.position_embedding(positions)
 
         # Causal mask: position i may only attend to positions <= i. Lower-triangular
         # matrix of ones; TransformerBlock's attention fills scores with -inf wherever
@@ -121,7 +141,7 @@ class Transformer(nn.Module):
         # 3. The output of the last transformer block is normalized and projected
         #    to the vocabulary size to produce logits (no softmax - see the note in
         #    __init__ about where softmax is actually applied).
-        x = self.ln_f(x)
+        x = self.norm_f(x)
         logits = self.head(x)
 
         return logits
@@ -144,8 +164,9 @@ class Transformer(nn.Module):
         self.eval()
 
         for _ in range(max_new_tokens):
-            # position_embedding only has block_size rows, so the model can't see
-            # further back than that - crop the context to its last block_size tokens.
+            # position_embedding only has block_size rows, and RoPE's cos/sin tables are sized
+            # to the current seq_length - either way the model can't see further back than
+            # block_size, so crop the context to its last block_size tokens.
             idx_cond = idx[:, -self.block_size:]
             logits = self(idx_cond)
             logits = logits[:, -1, :] / temperature  # only need next-token logits
