@@ -52,3 +52,7 @@ A: Rope is multiplicative verse previous additive methods. It incorporates relat
 # Building a decorder only Transformer
 
 Artichture for a decoder-only transformer is similar to the original transformer architecture, but it only includes the decoder part of the model. The decoder consists of multiple layers of self-attention and feed-forward neural networks, with residual connections and layer normalization applied at each layer. The input to the decoder is typically a sequence of tokens, which are first converted into embeddings and then processed through the self-attention mechanism to capture dependencies between tokens. The output of the decoder is a sequence of predictions, which can be used for tasks such as language modeling or text generation.
+
+
+### Thoughts
+Good project to recall building and trianing simple models. Didn't require too much depth, and the attention mathemtics is simple to implement which is nice. Mainly just good to get back into this sort of artichture and PyTorch implementation. No novel ideas introduces but concepts consolidated.
