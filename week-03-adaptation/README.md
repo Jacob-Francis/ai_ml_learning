@@ -23,3 +23,24 @@ LoRA rests on the claim that the weight *update* during fine-tuning has low intr
 5. Generate ten before/after completions and put them in the README.
 
 The rank sweep plot is the deliverable. It answers a question people actually ask in production.
+
+---
+
+## How to run
+
+See `notes.md` for the full step-by-step. Short version:
+
+```bash
+/home/jacob/venv/bin/pip install "transformers>=4.56" peft datasets   # one-off
+/home/jacob/venv/bin/python src/verify.py        # step 2: checks on the real model
+/home/jacob/venv/bin/python src/run_sweep.py     # steps 3-4: all training runs
+/home/jacob/venv/bin/python src/plot_results.py  # the rank-sweep plot (the deliverable)
+/home/jacob/venv/bin/python src/generate.py      # step 5: ten before/after completions
+```
+
+Reading summary: `PAPER_SUMMARY.md`. Notes and predictions: `notes.md`.
+
+## Results
+
+_Not run yet. After running, paste `results/rank_sweep_table.md`, embed `results/rank_sweep.png`,
+and paste `results/before_after.md` here._
